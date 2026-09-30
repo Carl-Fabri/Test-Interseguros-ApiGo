@@ -62,9 +62,13 @@ func New(cfg config.Config, stats service.StatisticsClient, opts Options) *fiber
 	}))
 
 	// Rutas públicas.
-	app.Get("/health", func(c fiber.Ctx) error {
+	// * GET / y GET /health responden 200: los balanceadores (p. ej. ECS Express Mode) hacen el health check
+	// * en "/" por defecto; así el servicio queda sano con cualquier configuración.
+	health := func(c fiber.Ctx) error {
 		return c.JSON(model.HealthResponse{Status: "ok", Service: "api-go"})
-	})
+	}
+	app.Get("/", health)
+	app.Get("/health", health)
 	app.Get("/openapi.yaml", func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderContentType, "application/yaml")
 		return c.Send(api.OpenAPISpec)
