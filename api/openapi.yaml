@@ -20,6 +20,18 @@ tags:
   - name: Health
 
 paths:
+  /:
+    get:
+      tags: [Health]
+      summary: Estado del servicio (alias de /health para health checks de balanceadores)
+      security: []
+      responses:
+        "200":
+          description: El servicio está activo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
   /health:
     get:
       tags: [Health]

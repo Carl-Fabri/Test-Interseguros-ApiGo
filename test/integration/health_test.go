@@ -8,9 +8,12 @@ import (
 func TestHealthIsPublic(t *testing.T) {
 	env := newTestEnv(t, fakeNodeOK)
 
-	resp, body := env.do(t, http.MethodGet, "/health", "", nil)
-	if resp.StatusCode != http.StatusOK || body["status"] != "ok" {
-		t.Fatalf("status = %d, body = %v", resp.StatusCode, body)
+	// "/" también responde 200: es el health check por defecto de ECS Express Mode.
+	for _, path := range []string{"/health", "/"} {
+		resp, body := env.do(t, http.MethodGet, path, "", nil)
+		if resp.StatusCode != http.StatusOK || body["status"] != "ok" {
+			t.Fatalf("%s: status = %d, body = %v", path, resp.StatusCode, body)
+		}
 	}
 }
 

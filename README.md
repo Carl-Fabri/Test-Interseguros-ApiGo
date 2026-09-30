@@ -235,6 +235,8 @@ En AWS, `JWT_SECRET` y `AUTH_PASSWORD` vienen de **Secrets Manager**, y `NODE_AP
 calculan a partir del ALB. Parámetros de [`deploy/aws/service.yml`](deploy/aws/service.yml): `Cpu`, `Memory`,
 `DesiredCount`, `NodeApiUrl`, `AuthUsername`, `JwtTtlMinutes` y `MatrixMaxDimension`.
 
+**¿Usas ECS Express Mode desde la consola?** Sigue [docs/deploy/aws-express.md](docs/deploy/aws-express.md): puerto del contenedor, ruta del health check y variables de cada servicio.
+
 **Costo y limpieza.** Los tres servicios comparten un solo balanceador y usan Fargate Spot: ≈ US$ 45 al mes si quedan
 encendidos 24/7 y centavos para una demo de horas ([detalle](docs/deploy/aws.md#4-costos-estimados)). Pausar:
 `PARAM_OVERRIDES="DesiredCount=0" ./deploy/aws/deploy.sh`. Eliminar: `CONFIRM=si ./deploy/aws/destroy.sh` (agrega
