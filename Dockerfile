@@ -13,7 +13,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/api /app/api
 
-ENV PORT=8080
-EXPOSE 8080
+ENV PORT=80
+EXPOSE 80
 USER nonroot:nonroot
 ENTRYPOINT ["/app/api"]
