@@ -1,0 +1,50 @@
+# CI de api-go (repositorio propio).
+# Costo mínimo: un solo job, sin despliegues ni publicación de imágenes (no usa servicios de AWS),
+# ignora cambios solo de documentación y cancela ejecuciones anteriores de la misma rama.
+name: api-go CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "specs/**", ".specify/**", ".claude/**", "deploy/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "specs/**", ".specify/**", ".claude/**", "deploy/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Calidad, pruebas y build Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Formato (gofmt)
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+      - name: Análisis estático (go vet)
+        run: go vet ./...
+
+      - name: Pruebas unitarias
+        run: go test -race -count=1 -coverprofile=coverage.out ./internal/... ./cmd/...
+
+      - name: Pruebas de integración
+        run: go test -race -count=1 ./test/integration/...
+
+      - name: Resumen de cobertura
+        run: go tool cover -func=coverage.out | tail -1 >> "$GITHUB_STEP_SUMMARY"
+
+      # Solo verifica que la imagen compila; no se publica en ningún registro.
+      - name: Build de la imagen Docker
+        run: docker build -t api-go:ci .

@@ -1,0 +1,9 @@
+bin/
+*.exe
+*.test
+.claude/
+Dockerfile
+.dockerignore
+.env
+skills-lock.json
+deploy/

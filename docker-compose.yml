@@ -1,0 +1,19 @@
+# Ejecución AISLADA de api-go (no requiere el resto del repositorio).
+# api-node se consume por URL: puede estar en otro host, otro contenedor o en la nube.
+services:
+  api-go:
+    build: .
+    image: api-go:latest
+    container_name: api-go
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file: .env
+    environment:
+      PORT: 8080
+      # Dentro del contenedor "localhost" es el propio api-go, por eso NODE_API_URL del .env
+      # se reemplaza aquí. Por defecto apunta a un api-node publicado en la máquina anfitriona;
+      # para otro destino: DOCKER_NODE_API_URL=https://api-node.ejemplo.com docker compose up
+      NODE_API_URL: ${DOCKER_NODE_API_URL:-http://host.docker.internal:3000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

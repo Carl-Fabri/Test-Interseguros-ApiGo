@@ -1,0 +1,23 @@
+{
+  "autoMemoryDirectory": "~/.claude/projects/retotecnico-api-go/memory",
+  "permissions": {
+    "allow": [
+      "Bash(go run:*)",
+      "Bash(go test:*)",
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(go fmt:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(go list:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(../api-node/**)",
+      "Edit(../api-node/**)",
+      "Write(../api-node/**)"
+    ]
+  }
+}

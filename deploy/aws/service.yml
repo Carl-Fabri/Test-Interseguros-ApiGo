@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  api-go · Servicio ECS Fargate (Go + Fiber). Publicado en el ALB compartido en el puerto 8080.
+  Requiere la pila de plataforma (infra/aws/platform.yml) con el mismo ProjectName.
+
+Metadata:
+  cfn-lint:
+    config:
+      # Las salidas muestran la URL del servicio a partir del DNS del ALB importado (intencional).
+      ignore_checks: [W6001]
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: retotecnico
+    Description: Prefijo usado por la pila de plataforma (sus exportaciones se importan con este nombre).
+  ImageUri:
+    Type: String
+    Description: Imagen en ECR (la define deploy.sh), p. ej. 123456789012.dkr.ecr.us-east-1.amazonaws.com/retotecnico/api-go:abc123
+  Cpu:
+    Type: String
+    Default: "256"
+    AllowedValues: ["256", "512", "1024"]
+  Memory:
+    Type: String
+    Default: "512"
+    AllowedValues: ["512", "1024", "2048"]
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+  ListenerPort:
+    Type: Number
+    Default: 8080
+    Description: Puerto del ALB en el que se publica api-go.
+  NodeApiUrl:
+    Type: String
+    Default: ""
+    Description: >
+      URL de api-node. Vacío = el listener de api-node en el ALB compartido (http://<alb>:3000).
+      Permite apuntar a un api-node desplegado en otro lugar sin tocar la plantilla.
+  AuthUsername:
+    Type: String
+    Default: admin
+    Description: Usuario de demo del login. La contraseña se genera en Secrets Manager (pila de plataforma).
+  JwtTtlMinutes:
+    Type: Number
+    Default: 60
+  MatrixMaxDimension:
+    Type: Number
+    Default: 100
+
+  CapacityProvider:
+    Type: String
+    Default: FARGATE_SPOT
+    AllowedValues: [FARGATE_SPOT, FARGATE]
+    Description: FARGATE_SPOT es ~70 % más barato (puede interrumpirse; ECS reemplaza la tarea). FARGATE para mayor estabilidad.
+
+Conditions:
+  UseSharedAlbForNode: !Equals [!Ref NodeApiUrl, ""]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}/api-go"
+      RetentionInDays: 7
+
+  # Rol que usa ECS para descargar la imagen, escribir logs y leer los secretos.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - { "Fn::ImportValue": !Sub "${ProjectName}-JwtSecretArn" }
+                  - { "Fn::ImportValue": !Sub "${ProjectName}-AuthPasswordSecretArn" }
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-api-go"
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: api-go
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings: [{ ContainerPort: 8080, Protocol: tcp }]
+          Environment:
+            - { Name: PORT, Value: "8080" }
+            - Name: NODE_API_URL
+              Value: !If
+                - UseSharedAlbForNode
+                - !Sub
+                  - "http://${AlbDns}:3000"
+                  - AlbDns: { "Fn::ImportValue": !Sub "${ProjectName}-AlbDns" }
+                - !Ref NodeApiUrl
+            - { Name: NODE_API_TIMEOUT_MS, Value: "5000" }
+            - { Name: JWT_ISSUER, Value: api-go }
+            - { Name: JWT_AUDIENCE, Value: matrix-services }
+            - { Name: JWT_TTL_MINUTES, Value: !Ref JwtTtlMinutes }
+            - { Name: AUTH_USERNAME, Value: !Ref AuthUsername }
+            - { Name: MATRIX_MAX_DIMENSION, Value: !Ref MatrixMaxDimension }
+            - Name: CORS_ALLOWED_ORIGINS
+              Value: !Sub
+                - "http://${AlbDns}"
+                - AlbDns: { "Fn::ImportValue": !Sub "${ProjectName}-AlbDns" }
+          Secrets:
+            - Name: JWT_SECRET
+              ValueFrom: { "Fn::ImportValue": !Sub "${ProjectName}-JwtSecretArn" }
+            - Name: AUTH_PASSWORD
+              ValueFrom: { "Fn::ImportValue": !Sub "${ProjectName}-AuthPasswordSecretArn" }
+          # La imagen es distroless (sin shell): la salud la verifica el ALB con GET /health.
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api-go
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${ProjectName}-api-go"
+      VpcId: { "Fn::ImportValue": !Sub "${ProjectName}-VpcId" }
+      Protocol: HTTP
+      Port: 8080
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "15" }
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: { "Fn::ImportValue": !Sub "${ProjectName}-AlbArn" }
+      Port: !Ref ListenerPort
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: api-go
+      Cluster: { "Fn::ImportValue": !Sub "${ProjectName}-ClusterName" }
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      HealthCheckGracePeriodSeconds: 30
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED # subredes públicas sin NAT: la IP pública permite descargar la imagen de ECR
+          Subnets: !Split [",", { "Fn::ImportValue": !Sub "${ProjectName}-PublicSubnets" }]
+          SecurityGroups: [{ "Fn::ImportValue": !Sub "${ProjectName}-TasksSecurityGroup" }]
+      LoadBalancers:
+        - ContainerName: api-go
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  ServiceUrl:
+    Value: !Sub
+      - "http://${AlbDns}:${ListenerPort}"
+      - AlbDns: { "Fn::ImportValue": !Sub "${ProjectName}-AlbDns" }
+  DocsUrl:
+    Value: !Sub
+      - "http://${AlbDns}:${ListenerPort}/docs"
+      - AlbDns: { "Fn::ImportValue": !Sub "${ProjectName}-AlbDns" }
+  LogGroup:
+    Value: !Ref LogGroup

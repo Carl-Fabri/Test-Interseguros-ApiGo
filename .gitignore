@@ -1,0 +1,8 @@
+.env
+bin/
+*.exe
+*.test
+*.out
+coverage.*
+.claude/settings.local.json
+.claude/agent-memory-local/
